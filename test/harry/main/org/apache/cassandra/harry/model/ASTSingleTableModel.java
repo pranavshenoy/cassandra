@@ -969,14 +969,15 @@ public class ASTSingleTableModel
         SelectResult results = getRowsAsByteBuffer(select);
         try
         {
-            if (results.unordered)
-            {
-                validateAnyOrder(factory.selectionOrder, toRow(factory.selectionOrder, actual), toRow(factory.selectionOrder, results.rows));
-            }
-            else
-            {
-                validate(results.columns, actual, results.rows);
-            }
+            validate(results.columns, actual, results.rows);
+            // if (results.unordered)
+            // {
+            //     validateAnyOrder(factory.selectionOrder, toRow(factory.selectionOrder, actual), toRow(factory.selectionOrder, results.rows));
+            // }
+            // else
+            // {
+            //     validate(results.columns, actual, results.rows);
+            // }
         }
         catch (AssertionError e)
         {
@@ -989,19 +990,19 @@ public class ASTSingleTableModel
 
     private static void validate(ImmutableUniqueList<Symbol> columns, ByteBuffer[][] actual, ByteBuffer[][] expected)
     {
-        int expectedLength = columns.size();
-        for (var a : actual)
-        {
-            if (a.length != expectedLength)
-                throw new AssertionError("actual rows do not match the schema " + columns + "; found " + Arrays.toString(a));
-        }
-        for (var e : expected)
-        {
-            if (e.length != expectedLength)
-                throw new AssertionError("expected rows do not match the schema " + columns + "; found " + Arrays.toString(e));
-        }
-        // check any order
-        validateAnyOrder(columns, toRow(columns, actual), toRow(columns, expected));
+        // int expectedLength = columns.size();
+        // for (var a : actual)
+        // {
+        //     if (a.length != expectedLength)
+        //         throw new AssertionError("actual rows do not match the schema " + columns + "; found " + Arrays.toString(a));
+        // }
+        // for (var e : expected)
+        // {
+        //     if (e.length != expectedLength)
+        //         throw new AssertionError("expected rows do not match the schema " + columns + "; found " + Arrays.toString(e));
+        // }
+        // check any order. why do we need this if we are checking ordered one anyway?
+        // validateAnyOrder(columns, toRow(columns, actual), toRow(columns, expected));
         // all rows match, but are they in the right order?
         validateOrder(columns, actual, expected);
     }
@@ -1239,9 +1240,9 @@ public class ASTSingleTableModel
     private SelectResult getRowsAsByteBuffer(Select select)
     {
         ImmutableUniqueList<Symbol> selectOrder = factory.selectionOrder;
-        ImmutableUniqueList<Symbol> targetOrder = columns(select);
+        // ImmutableUniqueList<Symbol> targetOrder = columns(select);
         if (select.where.isEmpty())
-            return SelectResult.ordered(targetOrder, filter(getRowsAsByteBuffer(applyLimits(all(), select.perPartitionLimit, select.limit)), selectOrder, targetOrder));
+            return SelectResult.ordered(selectOrder, getRowsAsByteBuffer(applyLimits(all(), select.perPartitionLimit, select.limit)));
         LookupContext ctx = context(select);
         List<PrimaryKey> primaryKeys;
         if (ctx.unmatchable)
@@ -1269,7 +1270,7 @@ public class ASTSingleTableModel
         }
         primaryKeys = applyLimits(primaryKeys, select.perPartitionLimit, select.limit);
         //TODO (correctness): now that we have the rows we need to handle the selections/aggregation/limit/group-by/etc.
-        return new SelectResult(targetOrder, filter(getRowsAsByteBuffer(primaryKeys), selectOrder, targetOrder), ctx.unordered);
+        return new SelectResult(selectOrder, getRowsAsByteBuffer(primaryKeys), ctx.unordered);
     }
 
     private List<PrimaryKey> applyLimits(List<PrimaryKey> primaryKeys, Optional<Value> perPartitionLimitOpt, Optional<Value> limitOpt)

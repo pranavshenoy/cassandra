@@ -48,6 +48,7 @@ import org.apache.cassandra.cql3.ast.Conditional.Where.Inequality;
 import org.apache.cassandra.cql3.ast.CreateIndexDDL;
 import org.apache.cassandra.cql3.ast.FunctionCall;
 import org.apache.cassandra.cql3.ast.Mutation;
+import org.apache.cassandra.cql3.ast.Reference;
 import org.apache.cassandra.cql3.ast.ReferenceExpression;
 import org.apache.cassandra.cql3.ast.Select;
 import org.apache.cassandra.cql3.ast.Symbol;
@@ -77,12 +78,13 @@ import static accord.utils.Property.commands;
 import static accord.utils.Property.stateful;
 import static org.apache.cassandra.utils.AbstractTypeGenerators.getTypeSupport;
 import static org.apache.cassandra.utils.Generators.toGen;
+import org.apache.cassandra.db.marshal.UserType;
 
 public class SingleNodeTableWalkTest extends StatefulASTBase
 {
     private static final Gen<Gen<Boolean>> BOOLEAN_DISTRIBUTION = Gens.bools().mixedDistribution();
     //TODO (coverage): COMPOSITE, DYNAMIC_COMPOSITE
-    private static final Gen<Gen<TypeKind>> TYPE_KIND_DISTRIBUTION = Gens.mixedDistribution(TypeKind.PRIMITIVE,
+    private static final Gen<Gen<TypeKind>> TYPE_KIND_DISTRIBUTION = Gens.mixedDistribution(TypeKind.UDT, TypeKind.UDT, TypeKind.UDT, TypeKind.PRIMITIVE,
                                                                                             TypeKind.SET, TypeKind.LIST, TypeKind.MAP,
                                                                                             TypeKind.TUPLE, TypeKind.UDT,
                                                                                             TypeKind.VECTOR
@@ -115,7 +117,7 @@ public class SingleNodeTableWalkTest extends StatefulASTBase
                                      .withTypeKinds(Generators.fromGen(TYPE_KIND_DISTRIBUTION.next(rs)))
                                      .withPrimitives(Generators.fromGen(PRIMITIVE_DISTRIBUTION.next(rs)))
                                      .withUserTypeFields(AbstractTypeGenerators.UserTypeFieldsGen.simpleNames())
-                                     .withMaxDepth(1);
+                                     .withMaxDepth(0);
     }
 
     protected TypeGenBuilder supportedPrimaryColumnTypes(RandomSource rs)
@@ -328,6 +330,59 @@ public class SingleNodeTableWalkTest extends StatefulASTBase
         return state.command(rs, select, annotate);
     }
 
+    public Property.Command<State, Void, ?> udtFieldQuery(RandomSource rs, State state)
+    {
+        // Find UDT columns
+        List<Symbol> udtColumns = state.searchableNonPartitionColumns.stream()
+            .filter(symbol -> symbol.type().isUDT())
+            .collect(Collectors.toList());
+        
+        if (udtColumns.isEmpty())
+            return Property.ignoreCommand();
+        
+        // Pick random symbol from UDT columns
+        Symbol udtSymbol = rs.pick(udtColumns);
+        // Get UDT type
+        UserType udtType = (UserType) udtSymbol.type();
+        // Select udt_col from ......
+        // This statement works
+        Select.Builder builder = Select.builder().table(state.metadata).allowFiltering();
+        // builder.columnSelection(udtSymbol.symbol, udtType);
+
+
+        // Select udt_col.field_name from ......
+        // This statement does not work
+        // Error: Undefined column name "v2.f2" in table ks3.tbl 
+        // The table and the UDT was created.
+        int numFields = udtType.size();
+        if (numFields <= 0) 
+        {
+            return Property.ignoreCommand();
+        }
+        int randomIndex = rs.nextInt(0, numFields);
+        // Get random field from the UDT
+        String fieldName = udtType.fieldNameAsString(randomIndex);
+        // FUll UDT Field name
+        String udtField = udtSymbol.name() + "." + fieldName;
+        AbstractType<?> fieldType = udtType.fieldType(randomIndex);
+        System.out.println("field name: " + udtField + " fieldType: " + fieldType.toString());
+        if (fieldType.isCollection() || fieldType.isUDT() || fieldType.isTuple() || fieldType.isVector() || fieldType.isMultiCell())
+        {
+            // Avoiding complex data types for now
+            System.out.println("fieldType is collection, UDT, or tuple." + fieldType.toString());
+            return Property.ignoreCommand();
+        }
+        System.out.println("fieldType is not collection, UDT, or tuple." + fieldType.toString());
+        Symbol utdFieldSymbol = new Symbol(fieldName, fieldType);
+        // builder.columnSelection(udtField, fieldType);
+        Reference ref = Reference.of(udtSymbol, utdFieldSymbol);
+        builder.selection(ref);
+        
+        
+        Select select = builder.build();
+        return state.command(rs, select, "UDT field query on " + udtSymbol.detailedName());
+    }
+
     private Property.Command<State, Void, ?> simpleRangeSearch(RandomSource rs, State state, Symbol symbol, ByteBuffer value, Select.Builder builder)
     {
         // do a simple search, like > or <
@@ -380,6 +435,7 @@ public class SingleNodeTableWalkTest extends StatefulASTBase
                                   .addIf(State::allowNonPartitionQuery, this::nonPartitionQuery)
                                   .addIf(State::allowNonPartitionMultiColumnQuery, this::multiColumnQuery)
                                   .addIf(State::allowPartitionQuery, this::partitionRestrictedQuery)
+                                  .addIf(State::hasUdtColumns, this::udtFieldQuery)  // Add UDT field queries
                                   .destroyState(State::close)
                                   .commandsTransformer(LoggingCommand.factory())
                                   .onSuccess(onSuccess(logger))
@@ -597,6 +653,11 @@ public class SingleNodeTableWalkTest extends StatefulASTBase
         public boolean allowPartitionQuery()
         {
             return !(model.isEmpty() || searchableNonPartitionColumns.isEmpty());
+        }
+
+        public boolean hasUdtColumns()
+        {
+            return searchableNonPartitionColumns.stream().anyMatch(symbol -> symbol.type().isUDT());
         }
 
         @Override
