@@ -990,19 +990,19 @@ public class ASTSingleTableModel
 
     private static void validate(ImmutableUniqueList<Symbol> columns, ByteBuffer[][] actual, ByteBuffer[][] expected)
     {
-        // int expectedLength = columns.size();
-        // for (var a : actual)
-        // {
-        //     if (a.length != expectedLength)
-        //         throw new AssertionError("actual rows do not match the schema " + columns + "; found " + Arrays.toString(a));
-        // }
-        // for (var e : expected)
-        // {
-        //     if (e.length != expectedLength)
-        //         throw new AssertionError("expected rows do not match the schema " + columns + "; found " + Arrays.toString(e));
-        // }
+        int expectedLength = columns.size();
+        for (var a : actual)
+        {
+            if (a.length != expectedLength)
+                throw new AssertionError("actual rows do not match the schema " + columns + "; found " + Arrays.toString(a));
+        }
+        for (var e : expected)
+        {
+            if (e.length != expectedLength)
+                throw new AssertionError("expected rows do not match the schema " + columns + "; found " + Arrays.toString(e));
+        }
         // check any order. why do we need this if we are checking ordered one anyway?
-        // validateAnyOrder(columns, toRow(columns, actual), toRow(columns, expected));
+        validateAnyOrder(columns, toRow(columns, actual), toRow(columns, expected));
         // all rows match, but are they in the right order?
         validateOrder(columns, actual, expected);
     }
